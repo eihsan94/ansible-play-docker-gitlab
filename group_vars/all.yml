@@ -1,0 +1,88 @@
+---
+### things you probably want to change
+efs_url: ''
+gitlab_domain: 'somedomain.ca'
+gitlab_backups_bucket: 'some_s3_bucket'
+gitlab_aws_region: 'us-west-2'
+ci_runner_registration_token: 's0m3s3cr3tk3y'
+image_tag_runner: "alpine"
+
+### pre-reqs and bootstrapping
+pypi_packages:
+  - docker
+dockermachine_install_dir: /usr/bin
+docker_install_compose: true
+efs_mountpoint: '/mnt/efs'
+
+### host configs
+# paths and ports to use on the host
+hostport_http: '80'
+hostport_https: '443'
+hostport_ssh: '22'
+hostpath_gitlab_config: '{{ efs_mountpoint }}/gitlab/config'
+hostpath_gitlab_logs: '{{ efs_mountpoint }}/gitlab/logs'
+hostpath_gitlab_data: '{{ efs_mountpoint }}/gitlab/data'
+hostpath_runner_config: '{{ efs_mountpoint }}/gitlab/runner'
+
+### gitlab configs
+gitlab_omnibus_config: |
+  external_url 'http://gitlab.{{ gitlab_domain }}'
+  gitlab_rails['gravatar_enabled'] = true
+  gitlab_rails['time_zone'] = 'UTC'
+  ## Email Settings
+  gitlab_rails['gitlab_email_enabled'] = true
+  gitlab_rails['gitlab_email_from'] = 'gitlab@{{ gitlab_domain }}'
+  gitlab_rails['gitlab_email_display_name'] = 'GitLab'
+  gitlab_rails['gitlab_email_reply_to'] = 'noreply@{{ gitlab_domain }}'
+  gitlab_rails['gitlab_email_subject_suffix'] = ''
+  # SMTP is required in Docker-based deploys...
+  gitlab_rails['smtp_enable'] = true
+  gitlab_rails['smtp_address'] = "gitlab_smtp"
+  gitlab_rails['smtp_port'] = 25
+  gitlab_rails['smtp_domain'] = "{{ gitlab_domain }}"
+  gitlab_rails['smtp_authentication'] = false
+
+  ### Backup Settings - https://docs.gitlab.com/omnibus/settings/backups.html
+  gitlab_rails['backup_keep_time'] = 604800
+  gitlab_rails['backup_upload_connection'] = {
+    'provider' => 'AWS',
+    'region' => '{{ gitlab_aws_region }}',
+    'use_iam_profile' => 'true'
+  }
+  gitlab_rails['backup_upload_remote_directory'] = '{{ gitlab_backups_bucket }}'
+  # s3 settings only
+  gitlab_rails['backup_multipart_chunk_size'] = 104857600
+  gitlab_rails['backup_encryption'] = 'AES256'
+  gitlab_rails['backup_storage_class'] = 'STANDARD'
+
+  #### Change the initial default admin password and shared runner registraion tokens.
+  ####! **Only applicable on initial setup, changing these settings after database
+  ####!   is created and seeded won't yield any change.**
+  # gitlab_rails['initial_root_password'] = "password"
+  gitlab_rails['initial_shared_runners_registration_token'] = "{{ ci_runner_registration_token }}"
+
+  ### GitLab's internal Docker registry
+  gitlab_rails['registry_enabled'] = false
+  gitlab_rails['gitlab_default_projects_features_container_registry'] = false
+
+ci_runner_config: |
+  concurrent = 20
+ci_runner_registration_options: |
+  --name "gitlab-runner-master" \
+  --run-untagged \
+  --docker-image "docker:latest" \
+  --executor "docker+machine" \
+  --machine-idle-time 30 \
+  --machine-idle-nodes 1 \
+  --machine-max-builds 8 \
+  --machine-off-peak-periods "* * 0-6,18-23 * * mon-fri *" \
+  --machine-off-peak-periods "* * * * * sat,sun *" \
+  --machine-off-peak-timezone "America/Vancouver" \
+  --machine-off-peak-idle-count 0 \
+  --machine-off-peak-idle-time 5 \
+  --machine-machine-name "gitlab-ci-slave-%s" \
+  --machine-machine-driver "amazonec2" \
+  --machine-machine-options "amazonec2-region={{ gitlab_aws_region }}" \
+  --machine-machine-options "amazonec2-request-spot-instance=true" \
+  --machine-machine-options "amazonec2-instance-type=m4.large" \
+  --machine-machine-options "amazonec2-spot-price=0.03"

@@ -1,0 +1,7 @@
+image: williamyeh/ansible:centos7
+
+test:
+  script:
+    - easy_install pip
+    - if [ -f 'requirements.yml' ]; then yum -y install git && ansible-galaxy install -r requirements.yml; fi
+    - ansible-playbook local.yml --connection=local -vvv
